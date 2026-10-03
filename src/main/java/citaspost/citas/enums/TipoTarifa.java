@@ -1,6 +1,9 @@
 package citaspost.citas.enums;
 
 public enum TipoTarifa {
-    GENERAL,
+    CONSULTA_GENERAL,
+    LIMPIEZA,
+    ORTODONCIA,
+    BLANQUEAMIENTO,
     ESPECIAL
 }

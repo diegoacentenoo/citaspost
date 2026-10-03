@@ -1,6 +1,5 @@
 package citaspost.citas.entities;
 
-
 import citaspost.citas.enums.EstadoCita;
 import citaspost.citas.enums.EstadoPago;
 import jakarta.persistence.*;
@@ -8,8 +7,12 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.UpdateTimestamp;
+
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.time.LocalDateTime;
 
 @Data
 @NoArgsConstructor
@@ -17,16 +20,16 @@ import java.time.LocalTime;
 @Builder
 @Entity
 @Table(name = "citas")
-public class Citas {
+public class Cita { // Renombrado a singular
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    // El psicólogo que atiende
+    // El odontólogo que atiende
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "psicologo_id", nullable = false)
-    private Persona psicologo;
+    @JoinColumn(name = "odontologo_id", nullable = false)
+    private Persona odontologo;
 
     // El paciente que asiste
     @ManyToOne(fetch = FetchType.LAZY)
@@ -45,7 +48,7 @@ public class Citas {
     // La tarifa aplicada a esta cita
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "tarifa_id", nullable = false)
-    private Tarifas tarifa;
+    private Tarifa tarifa;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "estado_pago", nullable = false)
@@ -59,4 +62,13 @@ public class Citas {
     @Column(nullable = false)
     @Builder.Default
     private Boolean asistio = false;
+
+    // Campos de auditoría (Recomendado)
+    @CreationTimestamp
+    @Column(name = "creado_en", updatable = false)
+    private LocalDateTime creadoEn;
+
+    @UpdateTimestamp
+    @Column(name = "actualizado_en")
+    private LocalDateTime actualizadoEn;
 }
