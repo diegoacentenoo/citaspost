@@ -17,7 +17,7 @@ import java.time.LocalTime;
 @Builder
 @Entity
 @Table(name = "citas")
-public class Citas {
+public class Cita {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -45,7 +45,7 @@ public class Citas {
     // La tarifa aplicada a esta cita
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "tarifa_id", nullable = false)
-    private Tarifas tarifa;
+    private Tarifa tarifa;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "estado_pago", nullable = false)

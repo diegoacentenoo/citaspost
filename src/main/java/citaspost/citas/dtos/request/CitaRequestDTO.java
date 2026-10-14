@@ -1,17 +1,35 @@
+// CitaRequestDTO.java
 package citaspost.citas.dtos.request;
 
-import citaspost.citas.enums.EstadoPago;
+import jakarta.validation.constraints.FutureOrPresent;
+import jakarta.validation.constraints.NotNull;
+import lombok.AllArgsConstructor;
 import lombok.Data;
+import lombok.NoArgsConstructor;
 import java.time.LocalDate;
 import java.time.LocalTime;
 
 @Data
+@AllArgsConstructor
+@NoArgsConstructor
 public class CitaRequestDTO {
+
+    @NotNull(message = "El ID del psicólogo es obligatorio")
     private Long psicologoId;
+
+    @NotNull(message = "El ID del paciente es obligatorio")
     private Long pacienteId;
-    private LocalDate fecha;
-    private LocalTime horaInicio;
-    private LocalTime horaFin;
+
+    @NotNull(message = "El ID de la tarifa es obligatoria")
     private Long tarifaId;
-    private EstadoPago estadoPago;
+
+    @NotNull(message = "La fecha de la cita es obligatoria")
+    @FutureOrPresent(message = "La fecha de la cita no puede estar en el pasado")
+    private LocalDate fecha;
+
+    @NotNull(message = "La hora de inicio es obligatoria")
+    private LocalTime horaInicio;
+
+    @NotNull(message = "La hora de fin es obligatoria")
+    private LocalTime horaFin;
 }
