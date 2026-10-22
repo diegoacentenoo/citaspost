@@ -15,15 +15,18 @@ import java.util.Optional;
 @Repository
 public interface CitaRepository extends JpaRepository<Cita, Long> {
 
-    List<Cita> findByPsicologoIdAndFechaAndEstadoCitaNot(Long psicologoId, LocalDate fecha, EstadoCita estadoCita);
+    List<Cita> findByPsicologoIdAndFechaAndEstadoCitaNotOrderByHoraInicioAsc(
+            Long psicologoId, LocalDate fecha, EstadoCita estadoCita);
 
     @Query("SELECT CASE WHEN COUNT(c) > 0 THEN true ELSE false END FROM Cita c " +
             "WHERE c.psicologo.id = :psicologoId AND c.fecha = :fecha AND c.estadoCita != 'CANCELADA' " +
-            "AND ((c.horaInicio < :horaFin AND c.horaFin > :horaInicio))")
+            "AND (c.horaInicio < :horaFin AND c.horaFin > :horaInicio)")
     boolean existsByPsicologoAndFechaAndHorarioSolapado(
             @Param("psicologoId") Long psicologoId, @Param("fecha") LocalDate fecha,
             @Param("horaInicio") LocalTime horaInicio, @Param("horaFin") LocalTime horaFin);
 
     Optional<Cita> findFirstByPacienteIdAndFechaGreaterThanEqualAndEstadoCitaNotOrderByFechaAscHoraInicioAsc(
             Long pacienteId, LocalDate fecha, EstadoCita estadoCita);
+
+    List<Cita> findByPacienteIdOrderByFechaDescHoraInicioDesc(Long pacienteId);
 }

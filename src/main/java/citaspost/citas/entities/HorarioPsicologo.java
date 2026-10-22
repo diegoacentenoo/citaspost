@@ -2,11 +2,7 @@ package citaspost.citas.entities;
 
 import citaspost.citas.enums.DiaSemana;
 import jakarta.persistence.*;
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Data;
-import lombok.NoArgsConstructor;
-
+import lombok.*;
 import java.time.LocalTime;
 
 @Data
@@ -21,7 +17,6 @@ public class HorarioPsicologo {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    // Relación Muchos a Uno (Un psicólogo puede tener muchos bloques de horario)
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "psicologo_id", nullable = false)
     private Persona psicologo;
@@ -37,5 +32,6 @@ public class HorarioPsicologo {
     private LocalTime horaFin;
 
     @Column(nullable = false)
+    @Builder.Default
     private Boolean activo = true;
 }

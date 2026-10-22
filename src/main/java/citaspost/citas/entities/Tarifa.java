@@ -2,11 +2,7 @@ package citaspost.citas.entities;
 
 import citaspost.citas.enums.TipoTarifa;
 import jakarta.persistence.*;
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Data;
-import lombok.NoArgsConstructor;
-
+import lombok.*;
 import java.math.BigDecimal;
 
 @Data
@@ -21,8 +17,8 @@ public class Tarifa {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Enumerated(EnumType.STRING)
-    @Column(name = "tipo_tarifa", nullable = false, unique = true)
+    @Enumerated(EnumType.STRING) // <-- ASEGÚRATE DE TENER ESTO
+    @Column(name = "tipo_tarifa", nullable = false, unique = true, length = 30)
     private TipoTarifa tipoTarifa;
 
     @Column(nullable = false, precision = 20, scale = 4)

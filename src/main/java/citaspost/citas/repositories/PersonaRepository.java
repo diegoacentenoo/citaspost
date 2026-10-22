@@ -10,11 +10,10 @@ import java.util.Optional;
 
 @Repository
 public interface PersonaRepository extends JpaRepository<Persona, Long> {
-
-    Optional<Persona> findByCedula (String cedula);
-
+    Optional<Persona> findByCedula(String cedula);
     Optional<Persona> findByCorreo(String correo);
-
+    boolean existsByCedula(String cedula);
+    boolean existsByCorreo(String correo);
+    boolean existsByTelefono(String telefono);
     List<Persona> findByRolAndActivoTrue(Rol rol);
-
 }

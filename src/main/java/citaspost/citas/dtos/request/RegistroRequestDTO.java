@@ -10,26 +10,19 @@ import lombok.Data;
 public class RegistroRequestDTO {
     @NotBlank(message = "El nombre es obligatorio")
     private String nombre;
-
     @NotBlank(message = "El apellido es obligatorio")
     private String apellido;
-
     @NotBlank(message = "La cédula es obligatoria")
     private String cedula;
-
     @NotBlank(message = "El teléfono es obligatorio")
     private String telefono;
-
     @NotBlank(message = "El correo es obligatorio")
     @Email(message = "Formato de correo inválido")
     private String correo;
-
-    @NotNull(message = "El rol es obligatorio")
-    private Rol rol;
-
-    @NotBlank(message = "El username es obligatorio")
+    @NotBlank(message = "El usuario es obligatorio")
     private String username;
-
     @NotBlank(message = "La contraseña es obligatoria")
     private String password;
+    @NotNull(message = "El rol es obligatorio")
+    private Rol rol;
 }

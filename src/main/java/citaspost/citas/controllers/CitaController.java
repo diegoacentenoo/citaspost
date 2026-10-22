@@ -2,23 +2,17 @@ package citaspost.citas.controllers;
 
 import citaspost.citas.dtos.request.CitaRequestDTO;
 import citaspost.citas.dtos.response.CitaResponseDTO;
-import citaspost.citas.entities.Cita;
-import citaspost.citas.entities.Usuario;
-import citaspost.citas.exception.ResourceNotFoundException;
-import citaspost.citas.repositories.UsuarioRepository;
+import citaspost.citas.dtos.response.CupoDisponibleDTO;
+import citaspost.citas.services.AuthService;
 import citaspost.citas.services.CitaService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
 import java.util.List;
-import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/citas")
@@ -26,82 +20,71 @@ import java.util.stream.Collectors;
 public class CitaController {
 
     private final CitaService citaService;
-    private final UsuarioRepository usuarioRepository;
+    private final AuthService authService;
 
     @PostMapping
-    @PreAuthorize("hasAnyRole('PACIENTE', 'RECEPCIONISTA', 'ADMINISTRADOR')")
-    public ResponseEntity<CitaResponseDTO> agendarCita(
-            @Valid @RequestBody CitaRequestDTO requestDTO,
-            Authentication authentication) { 
-
-        String usernameToken = authentication.getName();
-        String rolToken = authentication.getAuthorities().iterator().next().getAuthority();
-
-        Long pacienteIdSeguro = requestDTO.getPacienteId();
-
-        if (rolToken.equals("ROLE_PACIENTE")) {
-            Usuario usuarioActual = usuarioRepository.findByUsername(usernameToken)
-                    .orElseThrow(() -> new ResourceNotFoundException("Usuario no encontrado"));
-            pacienteIdSeguro = usuarioActual.getPersona().getId();
-        }
-
-        Cita nuevaCita = citaService.agendarCita(
-                requestDTO.getPsicologoId(), 
-                pacienteIdSeguro,
-                requestDTO.getTarifaId(),
-                requestDTO.getFecha(),
-                requestDTO.getHoraInicio(),
-                requestDTO.getHoraFin()
-        );
-
-        return ResponseEntity.status(HttpStatus.CREATED).body(mapearAResponseDTO(nuevaCita));
+    public ResponseEntity<CitaResponseDTO> agendarCita(@Valid @RequestBody CitaRequestDTO dto) {
+        return ResponseEntity.ok(citaService.agendarCita(dto));
     }
 
-    @GetMapping("/psicologo/{psicologoId}/fecha/{fecha}")
-    @PreAuthorize("hasAnyRole('PSICOLOGO', 'RECEPCIONISTA', 'ADMINISTRADOR')")
-    public ResponseEntity<List<CitaResponseDTO>> obtenerAgendaPsicologo(
-            @PathVariable Long psicologoId,
-            @PathVariable @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fecha) {
-
-        List<Cita> citas = citaService.obtenerCitasPorPsicologoYFecha(psicologoId, fecha);
-
-        List<CitaResponseDTO> responseList = citas.stream()
-                .map(this::mapearAResponseDTO)
-                .collect(Collectors.toList());
-
-        return ResponseEntity.ok(responseList);
+    @GetMapping("/cupos-disponibles")
+    public ResponseEntity<List<CupoDisponibleDTO>> obtenerCupos(
+            @RequestParam Long psicologoId,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fecha) {
+        return ResponseEntity.ok(citaService.obtenerCuposDisponibles(psicologoId, fecha));
     }
 
     @GetMapping("/paciente/proxima")
-    @PreAuthorize("hasRole('PACIENTE')")
-    public ResponseEntity<CitaResponseDTO> obtenerProximaCitaPaciente(Authentication authentication) {
-
-        String usernameToken = authentication.getName();
-        Usuario usuarioActual = usuarioRepository.findByUsername(usernameToken)
-                .orElseThrow(() -> new ResourceNotFoundException("Usuario no encontrado"));
-
-        Long pacienteId = usuarioActual.getPersona().getId();
-        Cita proximaCita = citaService.obtenerProximaCitaPaciente(pacienteId);
-
-        if (proximaCita == null) {
-            return ResponseEntity.ok().build(); 
+    public ResponseEntity<CitaResponseDTO> obtenerProximaCita(
+            @RequestHeader(value = "Authorization", required = false) String authHeader,
+            @RequestParam(required = false) Long pacienteId) {
+        Long idFinal = (pacienteId != null) ? pacienteId : authService.obtenerPersonaIdDesdeToken(authHeader);
+        if (idFinal == null) {
+            return ResponseEntity.ok(null);
         }
-
-        return ResponseEntity.ok(mapearAResponseDTO(proximaCita));
+        return ResponseEntity.ok(citaService.obtenerProximaCitaPaciente(idFinal));
     }
 
-    private CitaResponseDTO mapearAResponseDTO(Cita cita) {
-        return CitaResponseDTO.builder()
-                .id(cita.getId())
-                .psicologoNombre(cita.getPsicologo().getNombre() + " " + cita.getPsicologo().getApellido())
-                .pacienteNombre(cita.getPaciente().getNombre() + " " + cita.getPaciente().getApellido())
-                .fecha(cita.getFecha())
-                .horaInicio(cita.getHoraInicio())
-                .horaFin(cita.getHoraFin())
-                .tipoTarifa(cita.getTarifa().getTipoTarifa().name())
-                .montoTarifa(cita.getTarifa().getMonto())
-                .estadoPago(cita.getEstadoPago())
-                .estadoCita(cita.getEstadoCita())
-                .build();
+    @GetMapping("/paciente/{pacienteId}")
+    public ResponseEntity<List<CitaResponseDTO>> listarCitasDePaciente(@PathVariable Long pacienteId) {
+        return ResponseEntity.ok(citaService.obtenerMisCitasPaciente(pacienteId));
+    }
+
+    @PatchMapping("/{citaId}/cancelar")
+    public ResponseEntity<CitaResponseDTO> cancelarCita(@PathVariable Long citaId) {
+        return ResponseEntity.ok(citaService.cancelarCita(citaId));
+    }
+
+    @GetMapping("/psicologo/{psicologoId}/fecha/{fecha}")
+    public ResponseEntity<List<CitaResponseDTO>> obtenerAgendaPsicologo(
+            @PathVariable Long psicologoId,
+            @PathVariable @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fecha) {
+        return ResponseEntity.ok(citaService.obtenerCitasPorPsicologoYFecha(psicologoId, fecha));
+    }
+
+    @PatchMapping("/{citaId}/estado")
+    public ResponseEntity<CitaResponseDTO> cambiarEstadoCita(
+            @PathVariable Long citaId,
+            @RequestBody java.util.Map<String, Object> body) {
+
+        citaspost.citas.enums.EstadoCita estado = body.get("estadoCita") != null
+                ? citaspost.citas.enums.EstadoCita.valueOf(body.get("estadoCita").toString())
+                : null;
+        Boolean asistio = body.get("asistio") != null
+                ? Boolean.valueOf(body.get("asistio").toString())
+                : null;
+        String notasClinicas = body.get("notasClinicas") != null
+                ? body.get("notasClinicas").toString()
+                : null;
+
+        return ResponseEntity.ok(citaService.actualizarEstadoCita(citaId, estado, asistio, notasClinicas));
+    }
+
+    @PatchMapping("/{citaId}/pago")
+    public ResponseEntity<CitaResponseDTO> cambiarEstadoPago(
+            @PathVariable Long citaId,
+            @RequestBody java.util.Map<String, String> body) {
+        citaspost.citas.enums.EstadoPago estadoPago = citaspost.citas.enums.EstadoPago.valueOf(body.get("estadoPago"));
+        return ResponseEntity.ok(citaService.actualizarEstadoPago(citaId, estadoPago));
     }
 }
