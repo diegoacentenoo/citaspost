@@ -3,24 +3,20 @@ package citaspost.citas.services;
 import citaspost.citas.dtos.request.CitaRequestDTO;
 import citaspost.citas.dtos.response.CitaResponseDTO;
 import citaspost.citas.dtos.response.CupoDisponibleDTO;
-import citaspost.citas.entities.Cita;
-import citaspost.citas.entities.HorarioPsicologo;
-import citaspost.citas.entities.Persona;
-import citaspost.citas.entities.Tarifa;
+import citaspost.citas.entities.*;
 import citaspost.citas.enums.DiaSemana;
 import citaspost.citas.enums.EstadoCita;
 import citaspost.citas.enums.EstadoPago;
 import citaspost.citas.enums.Rol;
 import citaspost.citas.exception.BusinessException;
 import citaspost.citas.exception.ResourceNotFoundException;
-import citaspost.citas.repositories.CitaRepository;
-import citaspost.citas.repositories.HorarioPsicologoRepository;
-import citaspost.citas.repositories.PersonaRepository;
-import citaspost.citas.repositories.TarifaRepository;
+import citaspost.citas.repositories.*;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
 import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.LocalTime;
@@ -35,15 +31,39 @@ public class CitaService {
     private final PersonaRepository personaRepository;
     private final TarifaRepository tarifaRepository;
     private final HorarioPsicologoRepository horarioRepository;
+    private final CitaComprobanteFotoRepository fotoRepository;
+    private final ValidadorComprobanteService validadorComprobanteService;
+
+    /**
+     * Valida las reglas 1 y 2:
+     * 1. No se permite agendar para el mismo día (ni fechas pasadas).
+     * 2. Si ya pasaron las 5:00 PM (17:00), tampoco se permite agendar para el día siguiente.
+     */
+    private void validarFechaPermitidaSegunHoraActual(LocalDate fechaSolicitada) {
+        LocalDate hoy = LocalDate.now();
+        LocalTime ahora = LocalTime.now();
+        LocalTime horaCorte = LocalTime.of(17, 0);
+
+        if (!fechaSolicitada.isAfter(hoy)) {
+            throw new BusinessException("No se permite agendar citas para el mismo día ni en fechas pasadas.");
+        }
+
+        if (!ahora.isBefore(horaCorte) && fechaSolicitada.equals(hoy.plusDays(1))) {
+            throw new BusinessException("Pasadas las 5:00 PM no se permite agendar citas para el día siguiente. Debe agendar a partir del " + hoy.plusDays(2) + ".");
+        }
+    }
 
     @Transactional
-    public CitaResponseDTO agendarCita(CitaRequestDTO dto) {
-        if (dto.getFecha().isBefore(LocalDate.now())) {
-            throw new BusinessException("No se pueden agendar citas en fechas pasadas.");
-        }
+    public CitaResponseDTO agendarCitaConComprobante(CitaRequestDTO dto, MultipartFile imagen) throws IOException {
+        // 1. Validar reglas de fecha y corte de 5:00 PM
+        validarFechaPermitidaSegunHoraActual(dto.getFecha());
+
         if (!dto.getHoraFin().isAfter(dto.getHoraInicio())) {
             throw new BusinessException("La hora de fin debe ser posterior a la hora de inicio.");
         }
+
+        // 2. Validar que la imagen sea una factura / comprobante de pago real
+        validadorComprobanteService.validarImagenDePago(imagen);
 
         Persona psicologo = personaRepository.findById(dto.getPsicologoId())
                 .orElseThrow(() -> new ResourceNotFoundException("Psicólogo no encontrado."));
@@ -57,7 +77,7 @@ public class CitaService {
         Tarifa tarifa = tarifaRepository.findById(dto.getTarifaId())
                 .orElseThrow(() -> new ResourceNotFoundException("Tarifa no encontrada."));
 
-        // 1. Verificar que el psicólogo trabaje ese día y dentro de ese rango horario
+        // 3. Validar horario del psicólogo
         DiaSemana diaSemana = convertirDiaSemana(dto.getFecha().getDayOfWeek());
         List<HorarioPsicologo> horariosDia = horarioRepository
                 .findByPsicologoIdAndDiaSemanaAndActivoTrue(psicologo.getId(), diaSemana);
@@ -69,17 +89,34 @@ public class CitaService {
         boolean dentroDeHorario = horariosDia.stream().anyMatch(h ->
                 !dto.getHoraInicio().isBefore(h.getHoraInicio()) && !dto.getHoraFin().isAfter(h.getHoraFin())
         );
-
         if (!dentroDeHorario) {
             throw new BusinessException("La hora seleccionada está fuera del horario laboral del psicólogo.");
         }
 
-        // 2. Verificar que no exista solapamiento con otra cita activa
+        // 4. Validar que no exista cruce de citas
         boolean hayCruce = citaRepository.existsByPsicologoAndFechaAndHorarioSolapado(
                 psicologo.getId(), dto.getFecha(), dto.getHoraInicio(), dto.getHoraFin());
-
         if (hayCruce) {
             throw new BusinessException("Ese cupo ya se encuentra ocupado. Por favor seleccione otra hora.");
+        }
+
+        // 5. Gestionar pudientes / acompañantes según si es menor o mayor de edad
+        List<DatosPudiente> pudientesCita = new ArrayList<>();
+        if (dto.getPudientes() != null) {
+            for (DatosPudiente p : dto.getPudientes()) {
+                if (p.getNombreCompleto() != null && !p.getNombreCompleto().isBlank()) {
+                    pudientesCita.add(p);
+                }
+            }
+        }
+
+        if (paciente.isMenorDeEdad()) {
+            if (pudientesCita.isEmpty() && paciente.getPudientes() != null) {
+                pudientesCita.addAll(paciente.getPudientes());
+            }
+            if (pudientesCita.isEmpty() || pudientesCita.size() > 2) {
+                throw new BusinessException("El paciente es menor de edad y requiere tener 1 o 2 pudientes asignados a la cita.");
+            }
         }
 
         Cita nuevaCita = Cita.builder()
@@ -92,30 +129,40 @@ public class CitaService {
                 .estadoPago(EstadoPago.NOPAGADO)
                 .estadoCita(EstadoCita.PENDIENTE)
                 .asistio(false)
+                .pudientes(pudientesCita)
                 .build();
 
-        return mapearADTO(citaRepository.save(nuevaCita));
+        Cita citaGuardada = citaRepository.save(nuevaCita);
+
+        // 6. Guardar la foto del comprobante con @MapsId (igual a tu ProductoFoto)
+        CitaComprobanteFoto foto = new CitaComprobanteFoto();
+        foto.setCita(citaGuardada);
+        foto.setFotoBytes(imagen.getBytes());
+        foto.setMimeType(imagen.getContentType());
+        fotoRepository.save(foto);
+
+        return mapearADTO(citaGuardada);
     }
 
-    /**
-     * Genera los bloques de 1 hora según el horario del psicólogo para esa fecha
-     * y marca cuáles están libres y cuáles ya están reservados.
-     */
     public List<CupoDisponibleDTO> obtenerCuposDisponibles(Long psicologoId, LocalDate fecha) {
+        // Si la fecha viola la regla del mismo día o de las 5:00 PM, devolvemos lista vacía
+        LocalDate hoy = LocalDate.now();
+        LocalTime ahora = LocalTime.now();
+        if (!fecha.isAfter(hoy) || (!ahora.isBefore(LocalTime.of(17, 0)) && fecha.equals(hoy.plusDays(1)))) {
+            return List.of();
+        }
+
         DiaSemana dia = convertirDiaSemana(fecha.getDayOfWeek());
         List<HorarioPsicologo> bloquesHorario = horarioRepository
                 .findByPsicologoIdAndDiaSemanaAndActivoTrue(psicologoId, dia);
 
-        if (bloquesHorario.isEmpty()) {
-            return List.of();
-        }
+        if (bloquesHorario.isEmpty()) return List.of();
 
         List<Cita> citasDelDia = citaRepository
                 .findByPsicologoIdAndFechaAndEstadoCitaNotOrderByHoraInicioAsc(
                         psicologoId, fecha, EstadoCita.CANCELADA);
 
         List<CupoDisponibleDTO> cupos = new ArrayList<>();
-
         for (HorarioPsicologo bloque : bloquesHorario) {
             LocalTime cursor = bloque.getHoraInicio();
             while (cursor.plusHours(1).compareTo(bloque.getHoraFin()) <= 0) {
@@ -125,11 +172,6 @@ public class CitaService {
                 boolean ocupado = citasDelDia.stream().anyMatch(c ->
                         c.getHoraInicio().isBefore(finSlot) && c.getHoraFin().isAfter(inicioSlot)
                 );
-
-                // Si la fecha es hoy, deshabilitar horas que ya pasaron
-                if (fecha.equals(LocalDate.now()) && inicioSlot.isBefore(LocalTime.now())) {
-                    ocupado = true;
-                }
 
                 cupos.add(CupoDisponibleDTO.builder()
                         .horaInicio(inicioSlot)
@@ -144,18 +186,52 @@ public class CitaService {
     }
 
     @Transactional
+    public CitaResponseDTO anexarPudienteACita(Long citaId, DatosPudiente nuevoPudiente) {
+        Cita cita = citaRepository.findById(citaId)
+                .orElseThrow(() -> new ResourceNotFoundException("Cita no encontrada."));
+
+        if (cita.getPudientes().size() >= 2) {
+            throw new BusinessException("La cita ya cuenta con el máximo de 2 pudientes/acompañantes registrados.");
+        }
+        cita.getPudientes().add(nuevoPudiente);
+        return mapearADTO(citaRepository.save(cita));
+    }
+
+    public CitaComprobanteFoto obtenerComprobante(Long citaId) {
+        return fotoRepository.findById(citaId)
+                .orElseThrow(() -> new ResourceNotFoundException("No se encontró comprobante para la cita #" + citaId));
+    }
+
+    @Transactional
     public CitaResponseDTO cancelarCita(Long citaId) {
         Cita cita = citaRepository.findById(citaId)
                 .orElseThrow(() -> new ResourceNotFoundException("No se encontró la cita con ID: " + citaId));
-
         if (cita.getEstadoCita() == EstadoCita.CANCELADA) {
             throw new BusinessException("La cita ya se encuentra cancelada.");
         }
         if (cita.getEstadoCita() == EstadoCita.REALIZADA) {
             throw new BusinessException("No se puede cancelar una cita que ya fue realizada.");
         }
-
         cita.setEstadoCita(EstadoCita.CANCELADA);
+        return mapearADTO(citaRepository.save(cita));
+    }
+
+    @Transactional
+    public CitaResponseDTO actualizarEstadoCita(Long citaId, EstadoCita nuevoEstado, Boolean asistio, String notasClinicas) {
+        Cita cita = citaRepository.findById(citaId)
+                .orElseThrow(() -> new ResourceNotFoundException("Cita no encontrada con ID: " + citaId));
+        if (nuevoEstado != null) cita.setEstadoCita(nuevoEstado);
+        if (asistio != null) cita.setAsistio(asistio);
+        else if (nuevoEstado == EstadoCita.REALIZADA) cita.setAsistio(true);
+        if (notasClinicas != null) cita.setNotasClinicas(notasClinicas.trim());
+        return mapearADTO(citaRepository.save(cita));
+    }
+
+    @Transactional
+    public CitaResponseDTO actualizarEstadoPago(Long citaId, EstadoPago nuevoEstadoPago) {
+        Cita cita = citaRepository.findById(citaId)
+                .orElseThrow(() -> new ResourceNotFoundException("Cita no encontrada con ID: " + citaId));
+        cita.setEstadoPago(nuevoEstadoPago);
         return mapearADTO(citaRepository.save(cita));
     }
 
@@ -169,17 +245,13 @@ public class CitaService {
 
     public List<CitaResponseDTO> obtenerMisCitasPaciente(Long pacienteId) {
         return citaRepository.findByPacienteIdOrderByFechaDescHoraInicioDesc(pacienteId)
-                .stream()
-                .map(this::mapearADTO)
-                .toList();
+                .stream().map(this::mapearADTO).toList();
     }
 
     public List<CitaResponseDTO> obtenerCitasPorPsicologoYFecha(Long psicologoId, LocalDate fecha) {
         return citaRepository.findByPsicologoIdAndFechaAndEstadoCitaNotOrderByHoraInicioAsc(
                         psicologoId, fecha, EstadoCita.CANCELADA)
-                .stream()
-                .map(this::mapearADTO)
-                .toList();
+                .stream().map(this::mapearADTO).toList();
     }
 
     private DiaSemana convertirDiaSemana(DayOfWeek dayOfWeek) {
@@ -194,31 +266,14 @@ public class CitaService {
         };
     }
 
-    @Transactional
-    public CitaResponseDTO actualizarEstadoCita(Long citaId, EstadoCita nuevoEstado, Boolean asistio, String notasClinicas) {
-        Cita cita = citaRepository.findById(citaId)
-                .orElseThrow(() -> new ResourceNotFoundException("Cita no encontrada con ID: " + citaId));
-
-        if (nuevoEstado != null) {
-            cita.setEstadoCita(nuevoEstado);
-        }
-        if (asistio != null) {
-            cita.setAsistio(asistio);
-        } else if (nuevoEstado == EstadoCita.REALIZADA) {
-            cita.setAsistio(true);
-        }
-        if (notasClinicas != null) {
-            cita.setNotasClinicas(notasClinicas.trim());
-        }
-
-        return mapearADTO(citaRepository.save(cita));
-    }
-
     private CitaResponseDTO mapearADTO(Cita c) {
+        Persona pac = c.getPaciente();
         return CitaResponseDTO.builder()
                 .id(c.getId())
                 .psicologoNombre(c.getPsicologo().getNombre() + " " + c.getPsicologo().getApellido())
-                .pacienteNombre(c.getPaciente().getNombre() + " " + c.getPaciente().getApellido())
+                .pacienteNombre(pac.getNombre() + " " + pac.getApellido())
+                .pacienteMenorDeEdad(pac.isMenorDeEdad())
+                .pacienteEstudiante(pac.getEsEstudiante())
                 .fecha(c.getFecha())
                 .horaInicio(c.getHoraInicio())
                 .horaFin(c.getHoraFin())
@@ -228,15 +283,8 @@ public class CitaService {
                 .estadoCita(c.getEstadoCita())
                 .asistio(c.getAsistio())
                 .notasClinicas(c.getNotasClinicas())
+                .pudientes(c.getPudientes())
+                .tieneComprobante(fotoRepository.existsById(c.getId()))
                 .build();
-    }
-
-    @Transactional
-    public CitaResponseDTO actualizarEstadoPago(Long citaId, EstadoPago nuevoEstadoPago) {
-        Cita cita = citaRepository.findById(citaId)
-                .orElseThrow(() -> new ResourceNotFoundException("Cita no encontrada con ID: " + citaId));
-
-        cita.setEstadoPago(nuevoEstadoPago);
-        return mapearADTO(citaRepository.save(cita));
     }
 }

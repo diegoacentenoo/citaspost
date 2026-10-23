@@ -4,6 +4,11 @@ import citaspost.citas.enums.Rol;
 import jakarta.persistence.*;
 import lombok.*;
 
+import java.time.LocalDate;
+import java.time.Period;
+import java.util.ArrayList;
+import java.util.List;
+
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
@@ -31,15 +36,39 @@ public class Persona {
     @Column(nullable = false, unique = true, length = 100)
     private String correo;
 
+    @Column(name = "fecha_nacimiento", nullable = false)
+    private LocalDate fechaNacimiento;
+
+    @Column(name = "es_estudiante", nullable = false)
+    @Builder.Default
+    private Boolean esEstudiante = false;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private Rol rol;
 
     @Column(nullable = false)
     @Builder.Default
-    private Boolean activo = true; // Por defecto un usuario nace activo
+    private Boolean activo = true;
+
+    // 1 o 2 pudientes obligatorios si es menor de edad
+    @ElementCollection(fetch = FetchType.EAGER)
+    @CollectionTable(name = "persona_pudientes", joinColumns = @JoinColumn(name = "persona_id"))
+    @Builder.Default
+    private List<DatosPudiente> pudientes = new ArrayList<>();
 
     @OneToOne(mappedBy = "persona", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
-    @ToString.Exclude // Evita un bucle infinito si intentas imprimir la Persona en consola
+    @ToString.Exclude
     private Usuario usuario;
+
+    @Transient
+    public int getEdad() {
+        if (this.fechaNacimiento == null) return 18;
+        return Period.between(this.fechaNacimiento, LocalDate.now()).getYears();
+    }
+
+    @Transient
+    public boolean isMenorDeEdad() {
+        return getEdad() < 18;
+    }
 }

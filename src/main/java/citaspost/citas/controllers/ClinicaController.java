@@ -31,9 +31,25 @@ public class ClinicaController {
         return ResponseEntity.ok(clinicaService.listarPorRol(Rol.PACIENTE));
     }
 
+    // --- NUEVO ENDPOINT PARA CONSULTAR FICHA, MAYORÍA DE EDAD Y PUDIENTES ---
+    @GetMapping("/personas/{id}")
+    public ResponseEntity<PersonaResponseDTO> obtenerPersonaPorId(@PathVariable Long id) {
+        return ResponseEntity.ok(clinicaService.obtenerPersonaPorId(id));
+    }
+
     @GetMapping("/tarifas")
     public ResponseEntity<List<TarifaDTO>> listarTarifas() {
         return ResponseEntity.ok(clinicaService.listarTarifasActivas());
+    }
+
+    @GetMapping("/tarifas/todas")
+    public ResponseEntity<List<TarifaDTO>> listarTodasLasTarifas() {
+        return ResponseEntity.ok(clinicaService.listarTodasLasTarifas());
+    }
+
+    @PostMapping("/tarifas")
+    public ResponseEntity<TarifaDTO> guardarOActualizarTarifa(@RequestBody TarifaDTO dto) {
+        return ResponseEntity.ok(clinicaService.guardarOActualizarTarifa(dto));
     }
 
     @GetMapping("/horarios/psicologo/{psicologoId}")
@@ -50,15 +66,5 @@ public class ClinicaController {
     public ResponseEntity<Map<String, String>> eliminarHorario(@PathVariable Long horarioId) {
         clinicaService.eliminarHorario(horarioId);
         return ResponseEntity.ok(Map.of("message", "Horario eliminado correctamente"));
-    }
-
-    @GetMapping("/tarifas/todas")
-    public ResponseEntity<List<TarifaDTO>> listarTodasLasTarifas() {
-        return ResponseEntity.ok(clinicaService.listarTodasLasTarifas());
-    }
-
-    @PostMapping("/tarifas")
-    public ResponseEntity<TarifaDTO> guardarOActualizarTarifa(@RequestBody TarifaDTO dto) {
-        return ResponseEntity.ok(clinicaService.guardarOActualizarTarifa(dto));
     }
 }

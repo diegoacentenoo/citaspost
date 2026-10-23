@@ -48,17 +48,32 @@ public class ClinicaService {
 
     public List<PersonaResponseDTO> listarPorRol(Rol rol) {
         return personaRepository.findByRolAndActivoTrue(rol).stream()
-                .map(p -> PersonaResponseDTO.builder()
-                        .id(p.getId())
-                        .nombre(p.getNombre())
-                        .apellido(p.getApellido())
-                        .cedula(p.getCedula())
-                        .telefono(p.getTelefono())
-                        .correo(p.getCorreo())
-                        .rol(p.getRol())
-                        .activo(p.getActivo())
-                        .build())
+                .map(this::mapearPersonaDTO)
                 .toList();
+    }
+
+    public PersonaResponseDTO obtenerPersonaPorId(Long id) {
+        Persona p = personaRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Persona no encontrada."));
+        return mapearPersonaDTO(p);
+    }
+
+    private PersonaResponseDTO mapearPersonaDTO(Persona p) {
+        return PersonaResponseDTO.builder()
+                .id(p.getId())
+                .nombre(p.getNombre())
+                .apellido(p.getApellido())
+                .cedula(p.getCedula())
+                .telefono(p.getTelefono())
+                .correo(p.getCorreo())
+                .fechaNacimiento(p.getFechaNacimiento())
+                .edad(p.getEdad())
+                .menorDeEdad(p.isMenorDeEdad())
+                .esEstudiante(p.getEsEstudiante())
+                .pudientes(p.getPudientes())
+                .rol(p.getRol())
+                .activo(p.getActivo())
+                .build();
     }
 
     public List<TarifaDTO> listarTarifasActivas() {

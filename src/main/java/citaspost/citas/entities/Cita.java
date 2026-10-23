@@ -7,6 +7,8 @@ import lombok.*;
 
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.util.ArrayList;
+import java.util.List;
 
 @Data
 @NoArgsConstructor
@@ -54,7 +56,12 @@ public class Cita {
     @Builder.Default
     private Boolean asistio = false;
 
-    // NUEVO CAMPO: Evolución / Notas clínicas del psicólogo
     @Column(name = "notas_clinicas", columnDefinition = "TEXT")
     private String notasClinicas;
+
+    // Pudientes del menor o acompañante voluntario del mayor de edad (o anexado por Psicólogo/Admin/Recepción)
+    @ElementCollection(fetch = FetchType.EAGER)
+    @CollectionTable(name = "cita_pudientes", joinColumns = @JoinColumn(name = "cita_id"))
+    @Builder.Default
+    private List<DatosPudiente> pudientes = new ArrayList<>();
 }
