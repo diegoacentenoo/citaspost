@@ -8,6 +8,7 @@ import citaspost.citas.enums.DiaSemana;
 import citaspost.citas.enums.EstadoCita;
 import citaspost.citas.enums.EstadoPago;
 import citaspost.citas.enums.Rol;
+import citaspost.citas.enums.TipoTarifa;
 import citaspost.citas.exception.BusinessException;
 import citaspost.citas.exception.ResourceNotFoundException;
 import citaspost.citas.repositories.*;
@@ -34,11 +35,6 @@ public class CitaService {
     private final CitaComprobanteFotoRepository fotoRepository;
     private final ValidadorComprobanteService validadorComprobanteService;
 
-    /**
-     * Valida las reglas 1 y 2:
-     * 1. No se permite agendar para el mismo día (ni fechas pasadas).
-     * 2. Si ya pasaron las 5:00 PM (17:00), tampoco se permite agendar para el día siguiente.
-     */
     private void validarFechaPermitidaSegunHoraActual(LocalDate fechaSolicitada) {
         LocalDate hoy = LocalDate.now();
         LocalTime ahora = LocalTime.now();
@@ -55,14 +51,12 @@ public class CitaService {
 
     @Transactional
     public CitaResponseDTO agendarCitaConComprobante(CitaRequestDTO dto, MultipartFile imagen) throws IOException {
-        // 1. Validar reglas de fecha y corte de 5:00 PM
         validarFechaPermitidaSegunHoraActual(dto.getFecha());
 
         if (!dto.getHoraFin().isAfter(dto.getHoraInicio())) {
             throw new BusinessException("La hora de fin debe ser posterior a la hora de inicio.");
         }
 
-        // 2. Validar que la imagen sea una factura / comprobante de pago real
         validadorComprobanteService.validarImagenDePago(imagen);
 
         Persona psicologo = personaRepository.findById(dto.getPsicologoId())
@@ -74,10 +68,14 @@ public class CitaService {
         Persona paciente = personaRepository.findById(dto.getPacienteId())
                 .orElseThrow(() -> new ResourceNotFoundException("Paciente no encontrado."));
 
-        Tarifa tarifa = tarifaRepository.findById(dto.getTarifaId())
-                .orElseThrow(() -> new ResourceNotFoundException("Tarifa no encontrada."));
+        // Asignación automática de tarifa: Estudiante -> ESPECIAL | No estudiante -> GENERAL
+        TipoTarifa tipoTarifaCorrespondiente = Boolean.TRUE.equals(paciente.getEsEstudiante())
+                ? TipoTarifa.ESPECIAL
+                : TipoTarifa.GENERAL;
 
-        // 3. Validar horario del psicólogo
+        Tarifa tarifa = tarifaRepository.findByTipoTarifa(tipoTarifaCorrespondiente)
+                .orElseThrow(() -> new ResourceNotFoundException("No se encontró configurada la tarifa " + tipoTarifaCorrespondiente));
+
         DiaSemana diaSemana = convertirDiaSemana(dto.getFecha().getDayOfWeek());
         List<HorarioPsicologo> horariosDia = horarioRepository
                 .findByPsicologoIdAndDiaSemanaAndActivoTrue(psicologo.getId(), diaSemana);
@@ -93,14 +91,12 @@ public class CitaService {
             throw new BusinessException("La hora seleccionada está fuera del horario laboral del psicólogo.");
         }
 
-        // 4. Validar que no exista cruce de citas
         boolean hayCruce = citaRepository.existsByPsicologoAndFechaAndHorarioSolapado(
                 psicologo.getId(), dto.getFecha(), dto.getHoraInicio(), dto.getHoraFin());
         if (hayCruce) {
             throw new BusinessException("Ese cupo ya se encuentra ocupado. Por favor seleccione otra hora.");
         }
 
-        // 5. Gestionar pudientes / acompañantes según si es menor o mayor de edad
         List<DatosPudiente> pudientesCita = new ArrayList<>();
         if (dto.getPudientes() != null) {
             for (DatosPudiente p : dto.getPudientes()) {
@@ -134,7 +130,6 @@ public class CitaService {
 
         Cita citaGuardada = citaRepository.save(nuevaCita);
 
-        // 6. Guardar la foto del comprobante con @MapsId (igual a tu ProductoFoto)
         CitaComprobanteFoto foto = new CitaComprobanteFoto();
         foto.setCita(citaGuardada);
         foto.setFotoBytes(imagen.getBytes());
@@ -145,7 +140,6 @@ public class CitaService {
     }
 
     public List<CupoDisponibleDTO> obtenerCuposDisponibles(Long psicologoId, LocalDate fecha) {
-        // Si la fecha viola la regla del mismo día o de las 5:00 PM, devolvemos lista vacía
         LocalDate hoy = LocalDate.now();
         LocalTime ahora = LocalTime.now();
         if (!fecha.isAfter(hoy) || (!ahora.isBefore(LocalTime.of(17, 0)) && fecha.equals(hoy.plusDays(1)))) {
