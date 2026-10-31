@@ -46,8 +46,20 @@ public class ClinicaService {
         }
     }
 
-    public List<PersonaResponseDTO> listarPorRol(Rol rol) {
-        return personaRepository.findByRolAndActivoTrue(rol).stream()
+    public List<PersonaResponseDTO> listarPsicologosActivos() {
+        return personaRepository.findByRolAndActivoTrue(Rol.PSICOLOGO).stream()
+                .map(this::mapearPersonaDTO)
+                .toList();
+    }
+
+    public List<PersonaResponseDTO> listarTodosLosPsicologos() {
+        return personaRepository.findByRolOrderByActivoDescNombreAsc(Rol.PSICOLOGO).stream()
+                .map(this::mapearPersonaDTO)
+                .toList();
+    }
+
+    public List<PersonaResponseDTO> listarPacientesYPsicologos() {
+        return personaRepository.findByRolInAndActivoTrue(List.of(Rol.PACIENTE, Rol.PSICOLOGO)).stream()
                 .map(this::mapearPersonaDTO)
                 .toList();
     }
@@ -58,7 +70,18 @@ public class ClinicaService {
         return mapearPersonaDTO(p);
     }
 
+    @Transactional
+    public PersonaResponseDTO cambiarEstadoActivoPsicologo(Long psicologoId, boolean activo) {
+        Persona psicologo = personaRepository.findById(psicologoId)
+                .orElseThrow(() -> new ResourceNotFoundException("Psicólogo no encontrado."));
+        psicologo.setActivo(activo);
+        return mapearPersonaDTO(personaRepository.save(psicologo));
+    }
+
     private PersonaResponseDTO mapearPersonaDTO(Persona p) {
+        Persona asignado = p.getPsicologoAsignado();
+        boolean tieneAsignadoActivo = asignado != null && Boolean.TRUE.equals(asignado.getActivo());
+
         return PersonaResponseDTO.builder()
                 .id(p.getId())
                 .nombre(p.getNombre())
@@ -73,6 +96,9 @@ public class ClinicaService {
                 .pudientes(p.getPudientes())
                 .rol(p.getRol())
                 .activo(p.getActivo())
+                .psicologoAsignadoId(tieneAsignadoActivo ? asignado.getId() : null)
+                .psicologoAsignadoNombre(tieneAsignadoActivo ? asignado.getNombre() + " " + asignado.getApellido() : null)
+                .psicologoAsignadoActivo(tieneAsignadoActivo)
                 .build();
     }
 
@@ -101,7 +127,6 @@ public class ClinicaService {
             throw new BusinessException("Solo se pueden asignar horarios a usuarios con rol PSICOLOGO.");
         }
 
-        // Validar que no se solape con otro horario del mismo día
         List<HorarioPsicologo> existentes = horarioRepository
                 .findByPsicologoIdAndDiaSemanaAndActivoTrue(psicologo.getId(), dto.getDiaSemana());
 
@@ -180,5 +205,24 @@ public class ClinicaService {
                 .monto(guardada.getMonto())
                 .activa(guardada.getActiva())
                 .build();
+    }
+
+    @Transactional
+    public PersonaResponseDTO cambiarPsicologoAsignadoPaciente(Long pacienteId, Long nuevoPsicologoId) {
+        Persona paciente = personaRepository.findById(pacienteId)
+                .orElseThrow(() -> new ResourceNotFoundException("Paciente no encontrado."));
+
+        if (nuevoPsicologoId == null) {
+            paciente.setPsicologoAsignado(null);
+        } else {
+            Persona nuevoPsico = personaRepository.findById(nuevoPsicologoId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Psicólogo no encontrado."));
+            if (nuevoPsico.getRol() != Rol.PSICOLOGO || !Boolean.TRUE.equals(nuevoPsico.getActivo())) {
+                throw new BusinessException("El especialista seleccionado no es un psicólogo activo.");
+            }
+            paciente.setPsicologoAsignado(nuevoPsico);
+        }
+
+        return mapearPersonaDTO(personaRepository.save(paciente));
     }
 }

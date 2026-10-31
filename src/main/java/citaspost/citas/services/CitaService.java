@@ -20,6 +20,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.IOException;
 import java.time.DayOfWeek;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -49,33 +50,87 @@ public class CitaService {
         }
     }
 
+    /**
+     * Regla 2: Si ya pasaron más de 24 horas después de una cita PENDIENTE o CONFIRMADA
+     * y no fue marcada como REALIZADA, pasa automáticamente a SUSPENDIDA.
+     */
+
     @Transactional
-    public CitaResponseDTO agendarCitaConComprobante(CitaRequestDTO dto, MultipartFile imagen) throws IOException {
+    @org.springframework.scheduling.annotation.Scheduled(fixedRate = 60000)
+    public void verificarYSuspenderCitasVencidas() {
+        List<Cita> activas = citaRepository.findByEstadoCitaIn(List.of(EstadoCita.PENDIENTE, EstadoCita.CONFIRMADA));
+        LocalDateTime ahora = LocalDateTime.now();
+
+        for (Cita c : activas) {
+            LocalDateTime limite24Horas = LocalDateTime.of(c.getFecha(), c.getHoraFin()).plusHours(24);
+            if (ahora.isAfter(limite24Horas)) {
+                c.setEstadoCita(EstadoCita.SUSPENDIDA);
+                c.setAsistio(false);
+                citaRepository.save(c);
+            }
+        }
+    }
+
+    @Transactional
+    public CitaResponseDTO agendarCitaConComprobante(CitaRequestDTO dto, MultipartFile imagen, Long usuarioAutenticadoId) throws IOException {
+        verificarYSuspenderCitasVencidas();
         validarFechaPermitidaSegunHoraActual(dto.getFecha());
 
         if (!dto.getHoraFin().isAfter(dto.getHoraInicio())) {
             throw new BusinessException("La hora de fin debe ser posterior a la hora de inicio.");
         }
 
-        validadorComprobanteService.validarImagenDePago(imagen);
+        // Regla 1: Verificar que el número de comprobante no esté repetido
+        String numComprobanteLimpio = dto.getNumeroComprobante().trim();
+        if (citaRepository.existsByNumeroComprobante(numComprobanteLimpio)) {
+            throw new BusinessException("El número de comprobante '" + numComprobanteLimpio + "' ya fue utilizado en otra cita.");
+        }
 
         Persona psicologo = personaRepository.findById(dto.getPsicologoId())
                 .orElseThrow(() -> new ResourceNotFoundException("Psicólogo no encontrado."));
         if (psicologo.getRol() != Rol.PSICOLOGO || !Boolean.TRUE.equals(psicologo.getActivo())) {
-            throw new BusinessException("La persona seleccionada no es un psicólogo activo.");
+            throw new BusinessException("El psicólogo seleccionado no se encuentra activo.");
         }
 
         Persona paciente = personaRepository.findById(dto.getPacienteId())
                 .orElseThrow(() -> new ResourceNotFoundException("Paciente no encontrado."));
 
-        // Asignación automática de tarifa: Estudiante -> ESPECIAL | No estudiante -> GENERAL
-        TipoTarifa tipoTarifaCorrespondiente = Boolean.TRUE.equals(paciente.getEsEstudiante())
-                ? TipoTarifa.ESPECIAL
-                : TipoTarifa.GENERAL;
+        if (psicologo.getId().equals(paciente.getId())) {
+            throw new BusinessException("Un psicólogo no puede agendarse una consulta consigo mismo. Seleccione otro especialista.");
+        }
+
+        // Regla 6: Máximo 2 citas pendientes por asistir
+        long citasPorAsistir = citaRepository.countByPacienteIdAndEstadoCitaIn(
+                paciente.getId(), List.of(EstadoCita.PENDIENTE, EstadoCita.CONFIRMADA));
+        if (citasPorAsistir >= 2) {
+            throw new BusinessException("Ya tienes el máximo permitido de 2 citas pendientes por asistir. Cuando asistas a una de tus citas programadas podrás agendar otra.");
+        }
+
+        // Regla 5: Bloqueo de psicólogo asignado después de la primera cita
+        boolean ejecutadoPorAdmin = false;
+        if (usuarioAutenticadoId != null) {
+            Persona ejecutor = personaRepository.findById(usuarioAutenticadoId).orElse(null);
+            if (ejecutor != null && ejecutor.getRol() == Rol.ADMINISTRADOR) {
+                ejecutadoPorAdmin = true;
+            }
+        }
+
+        Persona psicologoFijo = paciente.getPsicologoAsignado();
+        if (psicologoFijo != null && Boolean.TRUE.equals(psicologoFijo.getActivo())) {
+            if (!psicologoFijo.getId().equals(psicologo.getId()) && !ejecutadoPorAdmin) {
+                throw new BusinessException("Tu psicólogo asignado es Dr(a). " + psicologoFijo.getNombre() + " " + psicologoFijo.getApellido() +
+                        ". No puedes cambiar de especialista a menos que el Administrador lo autorice o el psicólogo renuncie.");
+            }
+        }
+
+        // Regla 3: Tarifa ESPECIAL para Estudiantes O usuarios con rol PSICOLOGO; GENERAL para los demás
+        boolean aplicaTarifaEspecial = Boolean.TRUE.equals(paciente.getEsEstudiante()) || paciente.getRol() == Rol.PSICOLOGO;
+        TipoTarifa tipoTarifaCorrespondiente = aplicaTarifaEspecial ? TipoTarifa.ESPECIAL : TipoTarifa.GENERAL;
 
         Tarifa tarifa = tarifaRepository.findByTipoTarifa(tipoTarifaCorrespondiente)
                 .orElseThrow(() -> new ResourceNotFoundException("No se encontró configurada la tarifa " + tipoTarifaCorrespondiente));
 
+        // Validar horario laboral del psicólogo
         DiaSemana diaSemana = convertirDiaSemana(dto.getFecha().getDayOfWeek());
         List<HorarioPsicologo> horariosDia = horarioRepository
                 .findByPsicologoIdAndDiaSemanaAndActivoTrue(psicologo.getId(), diaSemana);
@@ -97,6 +152,10 @@ public class CitaService {
             throw new BusinessException("Ese cupo ya se encuentra ocupado. Por favor seleccione otra hora.");
         }
 
+        // Regla 1: Validar imagen del recibo y que el número de comprobante concuerde con la foto
+        validadorComprobanteService.validarImagenYNumeroComprobante(imagen, numComprobanteLimpio);
+
+        // Pudientes / Acompañantes
         List<DatosPudiente> pudientesCita = new ArrayList<>();
         if (dto.getPudientes() != null) {
             for (DatosPudiente p : dto.getPudientes()) {
@@ -115,6 +174,11 @@ public class CitaService {
             }
         }
 
+        // Fijar o actualizar el psicólogo asignado al paciente
+        paciente.setPsicologoAsignado(psicologo);
+        personaRepository.save(paciente);
+
+        // Como el comprobante y su número fueron validados exitosamente, pasa a PAGADO y CONFIRMADA automáticamente
         Cita nuevaCita = Cita.builder()
                 .psicologo(psicologo)
                 .paciente(paciente)
@@ -122,8 +186,9 @@ public class CitaService {
                 .horaInicio(dto.getHoraInicio())
                 .horaFin(dto.getHoraFin())
                 .tarifa(tarifa)
-                .estadoPago(EstadoPago.NOPAGADO)
-                .estadoCita(EstadoCita.PENDIENTE)
+                .numeroComprobante(numComprobanteLimpio)
+                .estadoPago(EstadoPago.PAGADO)
+                .estadoCita(EstadoCita.CONFIRMADA)
                 .asistio(false)
                 .pudientes(pudientesCita)
                 .build();
@@ -140,6 +205,7 @@ public class CitaService {
     }
 
     public List<CupoDisponibleDTO> obtenerCuposDisponibles(Long psicologoId, LocalDate fecha) {
+        verificarYSuspenderCitasVencidas();
         LocalDate hoy = LocalDate.now();
         LocalTime ahora = LocalTime.now();
         if (!fecha.isAfter(hoy) || (!ahora.isBefore(LocalTime.of(17, 0)) && fecha.equals(hoy.plusDays(1)))) {
@@ -203,21 +269,55 @@ public class CitaService {
         if (cita.getEstadoCita() == EstadoCita.CANCELADA) {
             throw new BusinessException("La cita ya se encuentra cancelada.");
         }
-        if (cita.getEstadoCita() == EstadoCita.REALIZADA) {
-            throw new BusinessException("No se puede cancelar una cita que ya fue realizada.");
+        if (cita.getEstadoCita() == EstadoCita.REALIZADA || cita.getEstadoCita() == EstadoCita.SUSPENDIDA) {
+            throw new BusinessException("No se puede cancelar una cita que ya fue realizada o suspendida.");
         }
         cita.setEstadoCita(EstadoCita.CANCELADA);
         return mapearADTO(citaRepository.save(cita));
     }
 
+    /**
+     * Regla 2: Solo permite marcar como REALIZADA si ya llegó la hora de la cita
+     * y no han pasado más de 24 horas. Si pasaron más de 24h, la pasa a SUSPENDIDA.
+     */
     @Transactional
     public CitaResponseDTO actualizarEstadoCita(Long citaId, EstadoCita nuevoEstado, Boolean asistio, String notasClinicas) {
+        verificarYSuspenderCitasVencidas();
+
         Cita cita = citaRepository.findById(citaId)
                 .orElseThrow(() -> new ResourceNotFoundException("Cita no encontrada con ID: " + citaId));
-        if (nuevoEstado != null) cita.setEstadoCita(nuevoEstado);
-        if (asistio != null) cita.setAsistio(asistio);
-        else if (nuevoEstado == EstadoCita.REALIZADA) cita.setAsistio(true);
-        if (notasClinicas != null) cita.setNotasClinicas(notasClinicas.trim());
+
+        if (cita.getEstadoCita() == EstadoCita.SUSPENDIDA && nuevoEstado == EstadoCita.REALIZADA) {
+            throw new BusinessException("Esta cita se encuentra SUSPENDIDA automáticamente porque transcurrieron más de 24 horas sin marcar asistencia.");
+        }
+
+        if (nuevoEstado == EstadoCita.REALIZADA) {
+            LocalDateTime ahora = LocalDateTime.now();
+            LocalDateTime inicioCita = LocalDateTime.of(cita.getFecha(), cita.getHoraInicio());
+            LocalDateTime limite24h = LocalDateTime.of(cita.getFecha(), cita.getHoraFin()).plusHours(24);
+
+            if (ahora.isBefore(inicioCita)) {
+                throw new BusinessException("Aún no se puede marcar como REALIZADA. Solo se habilita el día de la cita una vez iniciada o cumplida la hora (" +
+                        cita.getFecha() + " a las " + cita.getHoraInicio() + ").");
+            }
+            if (ahora.isAfter(limite24h)) {
+                cita.setEstadoCita(EstadoCita.SUSPENDIDA);
+                cita.setAsistio(false);
+                citaRepository.save(cita);
+                throw new BusinessException("Han pasado más de 24 horas desde la hora de la cita. Se ha marcado automáticamente como SUSPENDIDA.");
+            }
+            cita.setAsistio(true);
+        }
+
+        if (nuevoEstado != null) {
+            cita.setEstadoCita(nuevoEstado);
+        }
+        if (asistio != null && nuevoEstado != EstadoCita.REALIZADA) {
+            cita.setAsistio(asistio);
+        }
+        if (notasClinicas != null) {
+            cita.setNotasClinicas(notasClinicas.trim());
+        }
         return mapearADTO(citaRepository.save(cita));
     }
 
@@ -229,20 +329,26 @@ public class CitaService {
         return mapearADTO(citaRepository.save(cita));
     }
 
+    @Transactional
     public CitaResponseDTO obtenerProximaCitaPaciente(Long pacienteId) {
+        verificarYSuspenderCitasVencidas();
         return citaRepository
-                .findFirstByPacienteIdAndFechaGreaterThanEqualAndEstadoCitaNotOrderByFechaAscHoraInicioAsc(
-                        pacienteId, LocalDate.now(), EstadoCita.CANCELADA)
+                .findFirstByPacienteIdAndEstadoCitaInOrderByFechaAscHoraInicioAsc(
+                        pacienteId, List.of(EstadoCita.PENDIENTE, EstadoCita.CONFIRMADA))
                 .map(this::mapearADTO)
                 .orElse(null);
     }
 
+    @Transactional
     public List<CitaResponseDTO> obtenerMisCitasPaciente(Long pacienteId) {
+        verificarYSuspenderCitasVencidas();
         return citaRepository.findByPacienteIdOrderByFechaDescHoraInicioDesc(pacienteId)
                 .stream().map(this::mapearADTO).toList();
     }
 
+    @Transactional
     public List<CitaResponseDTO> obtenerCitasPorPsicologoYFecha(Long psicologoId, LocalDate fecha) {
+        verificarYSuspenderCitasVencidas();
         return citaRepository.findByPsicologoIdAndFechaAndEstadoCitaNotOrderByHoraInicioAsc(
                         psicologoId, fecha, EstadoCita.CANCELADA)
                 .stream().map(this::mapearADTO).toList();
@@ -262,9 +368,19 @@ public class CitaService {
 
     private CitaResponseDTO mapearADTO(Cita c) {
         Persona pac = c.getPaciente();
+        LocalDateTime ahora = LocalDateTime.now();
+        LocalDateTime inicioCita = LocalDateTime.of(c.getFecha(), c.getHoraInicio());
+        LocalDateTime limite24h = LocalDateTime.of(c.getFecha(), c.getHoraFin()).plusHours(24);
+
+        boolean enVentanaParaRealizar = (c.getEstadoCita() == EstadoCita.PENDIENTE || c.getEstadoCita() == EstadoCita.CONFIRMADA)
+                && !ahora.isBefore(inicioCita)
+                && !ahora.isAfter(limite24h);
+
         return CitaResponseDTO.builder()
                 .id(c.getId())
+                .psicologoId(c.getPsicologo().getId())
                 .psicologoNombre(c.getPsicologo().getNombre() + " " + c.getPsicologo().getApellido())
+                .pacienteId(pac.getId())
                 .pacienteNombre(pac.getNombre() + " " + pac.getApellido())
                 .pacienteMenorDeEdad(pac.isMenorDeEdad())
                 .pacienteEstudiante(pac.getEsEstudiante())
@@ -273,12 +389,14 @@ public class CitaService {
                 .horaFin(c.getHoraFin())
                 .tipoTarifa(c.getTarifa().getTipoTarifa().name())
                 .montoTarifa(c.getTarifa().getMonto())
+                .numeroComprobante(c.getNumeroComprobante())
                 .estadoPago(c.getEstadoPago())
                 .estadoCita(c.getEstadoCita())
                 .asistio(c.getAsistio())
                 .notasClinicas(c.getNotasClinicas())
                 .pudientes(c.getPudientes())
                 .tieneComprobante(fotoRepository.existsById(c.getId()))
+                .puedeMarcarRealizada(enVentanaParaRealizar)
                 .build();
     }
 }

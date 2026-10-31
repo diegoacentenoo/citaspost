@@ -16,4 +16,6 @@ public interface PersonaRepository extends JpaRepository<Persona, Long> {
     boolean existsByCorreo(String correo);
     boolean existsByTelefono(String telefono);
     List<Persona> findByRolAndActivoTrue(Rol rol);
+    List<Persona> findByRolOrderByActivoDescNombreAsc(Rol rol);
+    List<Persona> findByRolInAndActivoTrue(List<Rol> roles);
 }

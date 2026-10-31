@@ -1,6 +1,7 @@
 package citaspost.citas.dtos.request;
 
 import citaspost.citas.entities.DatosPudiente;
+import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 
@@ -22,7 +23,8 @@ public class CitaRequestDTO {
     private LocalTime horaInicio;
     @NotNull(message = "La hora de fin es obligatoria")
     private LocalTime horaFin;
+    @NotBlank(message = "El número de comprobante de pago es obligatorio")
+    private String numeroComprobante;
 
-    // Representantes del menor o acompañante opcional si es mayor de edad
     private List<DatosPudiente> pudientes;
 }

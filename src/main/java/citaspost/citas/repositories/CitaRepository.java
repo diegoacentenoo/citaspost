@@ -25,8 +25,14 @@ public interface CitaRepository extends JpaRepository<Cita, Long> {
             @Param("psicologoId") Long psicologoId, @Param("fecha") LocalDate fecha,
             @Param("horaInicio") LocalTime horaInicio, @Param("horaFin") LocalTime horaFin);
 
-    Optional<Cita> findFirstByPacienteIdAndFechaGreaterThanEqualAndEstadoCitaNotOrderByFechaAscHoraInicioAsc(
-            Long pacienteId, LocalDate fecha, EstadoCita estadoCita);
+    Optional<Cita> findFirstByPacienteIdAndEstadoCitaInOrderByFechaAscHoraInicioAsc(
+            Long pacienteId, List<EstadoCita> estados);
 
     List<Cita> findByPacienteIdOrderByFechaDescHoraInicioDesc(Long pacienteId);
+
+    boolean existsByNumeroComprobante(String numeroComprobante);
+
+    long countByPacienteIdAndEstadoCitaIn(Long pacienteId, List<EstadoCita> estados);
+
+    List<Cita> findByEstadoCitaIn(List<EstadoCita> estados);
 }

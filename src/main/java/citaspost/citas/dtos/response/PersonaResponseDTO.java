@@ -25,4 +25,9 @@ public class PersonaResponseDTO {
     private List<DatosPudiente> pudientes;
     private Rol rol;
     private Boolean activo;
+
+    // Psicólogo fijo asignado (si tiene y sigue activo)
+    private Long psicologoAsignadoId;
+    private String psicologoAsignadoNombre;
+    private Boolean psicologoAsignadoActivo;
 }

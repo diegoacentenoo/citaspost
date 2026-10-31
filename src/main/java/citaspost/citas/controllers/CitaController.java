@@ -32,6 +32,7 @@ public class CitaController {
 
     @PostMapping(value = "/guardar", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<?> agendarCita(
+            @RequestHeader(value = "Authorization", required = false) String authHeader,
             @Valid @RequestPart("cita") CitaRequestDTO citaDTO,
             @RequestPart("imagen") MultipartFile imagen) {
 
@@ -40,7 +41,8 @@ public class CitaController {
         }
 
         try {
-            CitaResponseDTO respuesta = citaService.agendarCitaConComprobante(citaDTO, imagen);
+            Long usuarioLogueadoId = authService.obtenerPersonaIdDesdeToken(authHeader);
+            CitaResponseDTO respuesta = citaService.agendarCitaConComprobante(citaDTO, imagen, usuarioLogueadoId);
             return ResponseEntity.ok(respuesta);
         } catch (BusinessException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage(), "message", e.getMessage()));

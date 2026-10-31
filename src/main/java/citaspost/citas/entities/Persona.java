@@ -44,14 +44,19 @@ public class Persona {
     private Boolean esEstudiante = false;
 
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false)
+    @Column(nullable = false, columnDefinition = "VARCHAR(30)")
     private Rol rol;
 
     @Column(nullable = false)
     @Builder.Default
-    private Boolean activo = true;
+    private Boolean activo = true; // Si es PSICOLOGO y pasa a false = Renunció / De baja
 
-    // 1 o 2 pudientes obligatorios si es menor de edad
+    // Psicólogo fijo asignado tras la primera cita
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "psicologo_asignado_id")
+    @ToString.Exclude
+    private Persona psicologoAsignado;
+
     @ElementCollection(fetch = FetchType.EAGER)
     @CollectionTable(name = "persona_pudientes", joinColumns = @JoinColumn(name = "persona_id"))
     @Builder.Default

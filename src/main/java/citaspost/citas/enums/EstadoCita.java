@@ -4,5 +4,6 @@ public enum EstadoCita {
     PENDIENTE,
     CONFIRMADA,
     CANCELADA,
-    REALIZADA
+    REALIZADA,
+    SUSPENDIDA
 }

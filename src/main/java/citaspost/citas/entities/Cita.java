@@ -43,12 +43,15 @@ public class Cita {
     @JoinColumn(name = "tarifa_id", nullable = false)
     private Tarifa tarifa;
 
+    @Column(name = "numero_comprobante", nullable = false, unique = true, length = 60)
+    private String numeroComprobante;
+
     @Enumerated(EnumType.STRING)
-    @Column(name = "estado_pago", nullable = false)
+    @Column(name = "estado_pago", nullable = false, columnDefinition = "VARCHAR(30)")
     private EstadoPago estadoPago;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "estado_cita", nullable = false)
+    @Column(name = "estado_cita", nullable = false, columnDefinition = "VARCHAR(30)")
     @Builder.Default
     private EstadoCita estadoCita = EstadoCita.PENDIENTE;
 
@@ -59,7 +62,6 @@ public class Cita {
     @Column(name = "notas_clinicas", columnDefinition = "TEXT")
     private String notasClinicas;
 
-    // Pudientes del menor o acompañante voluntario del mayor de edad (o anexado por Psicólogo/Admin/Recepción)
     @ElementCollection(fetch = FetchType.EAGER)
     @CollectionTable(name = "cita_pudientes", joinColumns = @JoinColumn(name = "cita_id"))
     @Builder.Default

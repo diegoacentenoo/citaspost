@@ -16,7 +16,9 @@ import java.util.List;
 @NoArgsConstructor
 public class CitaResponseDTO {
     private Long id;
+    private Long psicologoId;
     private String psicologoNombre;
+    private Long pacienteId;
     private String pacienteNombre;
     private Boolean pacienteMenorDeEdad;
     private Boolean pacienteEstudiante;
@@ -25,10 +27,12 @@ public class CitaResponseDTO {
     private LocalTime horaFin;
     private String tipoTarifa;
     private BigDecimal montoTarifa;
+    private String numeroComprobante;
     private EstadoPago estadoPago;
     private EstadoCita estadoCita;
     private Boolean asistio;
     private String notasClinicas;
     private List<DatosPudiente> pudientes;
     private Boolean tieneComprobante;
+    private Boolean puedeMarcarRealizada; // True solo entre la hora de la cita y 24h después
 }

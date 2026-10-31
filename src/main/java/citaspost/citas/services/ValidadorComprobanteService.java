@@ -22,12 +22,15 @@ public class ValidadorComprobanteService {
     private String geminiApiKey;
 
     private final HttpClient httpClient = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(10))
+            .connectTimeout(Duration.ofSeconds(12))
             .build();
 
-    public void validarImagenDePago(MultipartFile file) {
+    public void validarImagenYNumeroComprobante(MultipartFile file, String numeroComprobante) {
         if (file == null || file.isEmpty()) {
             throw new BusinessException("Es obligatorio adjuntar la foto de la factura o comprobante de pago.");
+        }
+        if (numeroComprobante == null || numeroComprobante.trim().length() < 4) {
+            throw new BusinessException("Debe ingresar un número de comprobante o referencia válido (mínimo 4 caracteres).");
         }
 
         String contentType = file.getContentType();
@@ -38,15 +41,13 @@ public class ValidadorComprobanteService {
         try {
             byte[] bytes = file.getBytes();
 
-            // 1. Verificar que los bytes correspondan a una imagen real con dimensiones legibles
             BufferedImage image = ImageIO.read(new ByteArrayInputStream(bytes));
             if (image == null || image.getWidth() < 150 || image.getHeight() < 150) {
                 throw new BusinessException("La imagen subida es inválida o demasiado pequeña para ser un comprobante legible.");
             }
 
-            // 2. Si hay API Key de Gemini configurada, verificamos por IA que sea una factura/comprobante y no un perro u otra foto
             if (geminiApiKey != null && !geminiApiKey.isBlank() && !geminiApiKey.equals("TU_API_KEY_DE_GEMINI_AQUI")) {
-                verificarConGeminiVision(bytes, contentType);
+                verificarConGeminiVision(bytes, contentType, numeroComprobante.trim());
             }
         } catch (BusinessException e) {
             throw e;
@@ -55,11 +56,15 @@ public class ValidadorComprobanteService {
         }
     }
 
-    private void verificarConGeminiVision(byte[] imageBytes, String mimeType) {
+    private void verificarConGeminiVision(byte[] imageBytes, String mimeType, String numeroReferencia) {
         try {
             String base64Image = Base64.getEncoder().encodeToString(imageBytes);
-            String prompt = "Analiza esta imagen. ¿Es una factura, recibo, capture de transferencia bancaria, pago móvil o comprobante de pago válido? " +
-                    "Si es un comprobante o factura responde exactamente SI. Si es otra cosa (como un perro, mascota, persona, paisaje, meme u objeto) responde exactamente NO seguido de qué es.";
+            String prompt = "Analiza esta imagen rigurosamente y verifica dos cosas: " +
+                    "1) ¿Es una factura, recibo, capture de transferencia bancaria o comprobante de pago móvil real? " +
+                    "2) ¿Aparece visible en la imagen el número de comprobante/referencia '" + numeroReferencia + "'? " +
+                    "Si NO es un comprobante de pago (ej: perro, persona, paisaje, objeto), responde exactamente: NO_ES_PAGO. " +
+                    "Si ES un comprobante de pago pero el número '" + numeroReferencia + "' NO coincide con el de la imagen, responde exactamente: NUMERO_NO_COINCIDE. " +
+                    "Si es un comprobante válido y el número coincide, responde exactamente: VALIDO.";
 
             String jsonBody = """
                 {
@@ -82,14 +87,16 @@ public class ValidadorComprobanteService {
 
             if (response.statusCode() == 200 && response.body().contains("\"text\"")) {
                 String bodyUpper = response.body().toUpperCase();
-                if (bodyUpper.contains("\"TEXT\": \"NO") || bodyUpper.contains("\"TEXT\":\"NO")) {
-                    throw new BusinessException("La imagen rechazada no es una factura ni comprobante de pago válido. Por favor suba únicamente la foto del pago.");
+                if (bodyUpper.contains("NO_ES_PAGO")) {
+                    throw new BusinessException("La imagen subida NO es una factura ni comprobante de pago válido.");
+                }
+                if (bodyUpper.contains("NUMERO_NO_COINCIDE")) {
+                    throw new BusinessException("El número de comprobante ingresado (" + numeroReferencia + ") no concuerda con el número visible en la foto del recibo.");
                 }
             }
         } catch (BusinessException e) {
             throw e;
         } catch (Exception ignored) {
-            // Si falla la red externa no bloqueamos el hilo local, habiendo pasado ya la validación de BufferedImage
         }
     }
 }
